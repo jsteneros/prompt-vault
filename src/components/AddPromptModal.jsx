@@ -7,10 +7,23 @@ const initialForm = {
   description: "",
   fullPrompt: "",
   headerImage: "",
-  tags: "",
+  tags: [],
   isFavorite: false,
   visibility: "private",
 };
+
+const TAG_OPTIONS = [
+  "Image Generation",
+  "Marketing",
+  "Social Media",
+  "Development",
+  "Copywriting",
+  "3D",
+  "Research",
+  "Video",
+  "Audio",
+  "Other",
+];
 
 function toFormState(initialPrompt) {
   if (!initialPrompt) return initialForm;
@@ -19,7 +32,7 @@ function toFormState(initialPrompt) {
     description: initialPrompt.description || "",
     fullPrompt: initialPrompt.fullPrompt || "",
     headerImage: initialPrompt.headerImage || "",
-    tags: Array.isArray(initialPrompt.tags) ? initialPrompt.tags.join(", ") : "",
+    tags: Array.isArray(initialPrompt.tags) ? initialPrompt.tags : [],
     isFavorite: Boolean(initialPrompt.isFavorite),
     visibility: initialPrompt.visibility === "public" ? "public" : "private",
   };
@@ -36,6 +49,7 @@ function AddPromptModal({
   const [imageName, setImageName] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [isProcessingImage, setIsProcessingImage] = useState(false);
+  const [tagChoice, setTagChoice] = useState(TAG_OPTIONS[0]);
 
   useEffect(() => {
     if (!open) return;
@@ -43,6 +57,7 @@ function AddPromptModal({
     setImageName(initialPrompt?.headerImage ? "Current image" : "");
     setSubmitError("");
     setIsProcessingImage(false);
+    setTagChoice(TAG_OPTIONS[0]);
   }, [open, initialPrompt]);
 
   useEffect(() => {
@@ -95,10 +110,7 @@ function AddPromptModal({
       description: form.description.trim(),
       fullPrompt: form.fullPrompt.trim(),
       headerImage: form.headerImage,
-      tags: form.tags
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean),
+      tags: form.tags,
       visibility: form.visibility === "public" ? "public" : "private",
     };
 
@@ -119,6 +131,21 @@ function AddPromptModal({
       return;
     }
     setSubmitError(result?.error || "Could not save prompt. Please try again.");
+  };
+
+  const addSelectedTag = () => {
+    if (!tagChoice) return;
+    setForm((current) => {
+      if (current.tags.includes(tagChoice)) return current;
+      return { ...current, tags: [...current.tags, tagChoice] };
+    });
+  };
+
+  const removeTag = (tagToRemove) => {
+    setForm((current) => ({
+      ...current,
+      tags: current.tags.filter((tag) => tag !== tagToRemove),
+    }));
   };
 
   return (
@@ -229,19 +256,52 @@ function AddPromptModal({
                 ) : null}
               </label>
 
-              <label className="space-y-1.5">
+              <div className="space-y-1.5">
                 <span className="text-sm font-medium text-slate-700">
-                  Tags (comma separated)
+                  Tags
                 </span>
-                <input
-                  type="text"
-                  required
-                  value={form.tags}
-                  onChange={(event) => updateField("tags", event.target.value)}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-slate-400"
-                  placeholder="AI, Writing, Productivity"
-                />
-              </label>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={tagChoice}
+                    onChange={(event) => setTagChoice(event.target.value)}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-slate-400"
+                  >
+                    {TAG_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={addSelectedTag}
+                    className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Add
+                  </button>
+                </div>
+                <div className="min-h-10 rounded-xl border border-slate-200 bg-slate-50 p-2">
+                  {form.tags.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {form.tags.map((tag) => (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => removeTag(tag)}
+                          className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
+                          title="Remove tag"
+                        >
+                          {tag} ×
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="px-1 py-1 text-xs text-slate-500">
+                      Add at least one tag.
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
 
             <label className="mt-4 inline-flex items-center gap-2 text-sm text-slate-700">

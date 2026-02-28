@@ -90,15 +90,21 @@ function sanitizeUser(user) {
 }
 
 function authRequired(req, res, next) {
-  const header = req.headers.authorization || "";
+  const user = parseUserFromAuthHeader(req.headers.authorization);
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+  req.user = user;
+  next();
+}
+
+function parseUserFromAuthHeader(authorizationHeader) {
+  const header = authorizationHeader || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (!token) return res.status(401).json({ error: "Unauthorized" });
+  if (!token) return null;
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    req.user = { id: payload.sub, email: payload.email };
-    next();
+    return { id: payload.sub, email: payload.email };
   } catch {
-    return res.status(401).json({ error: "Invalid token" });
+    return null;
   }
 }
 
@@ -244,6 +250,28 @@ app.get("/api/prompts/public", async (_req, res) => {
     orderBy: { createdAt: "desc" },
   });
   return res.json({ prompts: prompts.map(sanitizePrompt) });
+});
+
+app.get("/api/prompts/:id", async (req, res) => {
+  const prompt = await prisma.prompt.findUnique({
+    where: { id: req.params.id },
+    include: { user: { select: { id: true, name: true, email: true } } },
+  });
+  if (!prompt) return res.status(404).json({ error: "Prompt not found" });
+
+  if (prompt.visibility === "PUBLIC") {
+    return res.json({ prompt: sanitizePrompt(prompt) });
+  }
+
+  const user = parseUserFromAuthHeader(req.headers.authorization);
+  if (!user) {
+    return res.status(401).json({ error: "Login required for private prompt" });
+  }
+  if (user.id !== prompt.userId) {
+    return res.status(403).json({ error: "You do not have access to this prompt" });
+  }
+
+  return res.json({ prompt: sanitizePrompt(prompt) });
 });
 
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));

@@ -13,6 +13,7 @@ import {
   deletePrompt,
   getMe,
   getMyPrompts,
+  getPromptById,
   getPublicPrompts,
   login,
   register,
@@ -31,7 +32,7 @@ function App() {
   const [prompts, setPrompts] = useState([]);
   const [publicPrompts, setPublicPrompts] = useState([]);
 
-  const [activeFilter, setActiveFilter] = useState("All");
+  const [activeFilter, setActiveFilter] = useState("My Prompts");
   const [activeTag, setActiveTag] = useState(null);
   const [selectedPrompt, setSelectedPrompt] = useState(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -43,6 +44,28 @@ function App() {
   const [publicActiveTag, setPublicActiveTag] = useState("All");
   const [publicSearch, setPublicSearch] = useState("");
   const [toast, setToast] = useState("");
+  const [pendingSharedPromptId, setPendingSharedPromptId] = useState("");
+
+  const setPromptQueryParam = (promptId) => {
+    const url = new URL(window.location.href);
+    if (promptId) {
+      url.searchParams.set("prompt", promptId);
+    } else {
+      url.searchParams.delete("prompt");
+    }
+    window.history.replaceState({}, "", url.toString());
+  };
+
+  const openPrompt = (prompt) => {
+    if (!prompt?.id) return;
+    setSelectedPrompt(prompt);
+    setPromptQueryParam(prompt.id);
+  };
+
+  const closePrompt = () => {
+    setSelectedPrompt(null);
+    setPromptQueryParam("");
+  };
 
   useEffect(() => {
     if (!token) {
@@ -71,6 +94,41 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const sharedId = new URLSearchParams(window.location.search).get("prompt") || "";
+    if (sharedId) setPendingSharedPromptId(sharedId);
+  }, []);
+
+  useEffect(() => {
+    if (!pendingSharedPromptId) return;
+
+    let cancelled = false;
+    async function loadSharedPrompt() {
+      try {
+        const data = await getPromptById(pendingSharedPromptId, token);
+        if (cancelled) return;
+        setSelectedPrompt(data.prompt);
+      } catch (error) {
+        if (cancelled) return;
+        if (String(error.message).toLowerCase().includes("login required")) {
+          setAuthMode("login");
+          setAuthError("Please create an account or login to view this private prompt.");
+          setIsAuthModalOpen(true);
+          return;
+        }
+        setToast(error.message || "Could not open shared prompt");
+        setPromptQueryParam("");
+      } finally {
+        if (!cancelled) setPendingSharedPromptId("");
+      }
+    }
+
+    loadSharedPrompt();
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingSharedPromptId, token]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadAuthed() {
@@ -85,7 +143,7 @@ function App() {
         if (cancelled) return;
         setCurrentUser(me.user);
         setPrompts(mine.prompts || []);
-        setActiveFilter("All");
+        setActiveFilter("My Prompts");
         setActiveTag(null);
       } catch {
         if (cancelled) return;
@@ -116,7 +174,7 @@ function App() {
   const filteredPrompts = useMemo(() => {
     return prompts.filter((prompt) => {
       const matchesFavorite =
-        activeFilter !== "Favorites" || Boolean(prompt.isFavorite);
+        activeFilter !== "My Favourites" || Boolean(prompt.isFavorite);
       const matchesTag = !activeTag || prompt.tags.includes(activeTag);
       return matchesFavorite && matchesTag;
     });
@@ -165,6 +223,18 @@ function App() {
       setToast("Prompt copied ✨");
     } catch {
       setToast("Copy failed");
+    }
+  };
+
+  const handleSharePrompt = async (prompt) => {
+    if (!prompt?.id) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("prompt", prompt.id);
+    try {
+      await navigator.clipboard.writeText(url.toString());
+      setToast("Prompt link copied ✨");
+    } catch {
+      setToast("Could not copy share link");
     }
   };
 
@@ -237,7 +307,7 @@ function App() {
       await deletePrompt(token, prompt.id);
       setPrompts((current) => current.filter((item) => item.id !== prompt.id));
       if (selectedPrompt?.id === prompt.id) {
-        setSelectedPrompt(null);
+        closePrompt();
       }
       if (prompt.visibility === "public") {
         await refreshPublicPrompts();
@@ -381,13 +451,14 @@ function App() {
                       <PromptCard
                         prompt={prompt}
                         onCopy={handleCopy}
+                        onShare={handleSharePrompt}
                         onToggleFavorite={handleToggleFavorite}
                         onEdit={(item) => {
                           setEditingPrompt(item);
                           setIsAddModalOpen(true);
                         }}
                         onDelete={handleDeletePrompt}
-                        onReadMore={setSelectedPrompt}
+                        onReadMore={openPrompt}
                         onTagClick={(tag) => setActiveTag(tag)}
                       />
                     </motion.div>
@@ -421,7 +492,7 @@ function App() {
                               : "border border-[#d2d2d2] bg-transparent text-[#666] hover:bg-[#ececec]"
                           }`}
                         >
-                          {tag}
+                          {tag === "All" ? "All Categories" : tag}
                         </button>
                       ))}
                     </div>
@@ -452,7 +523,8 @@ function App() {
                             readOnly
                             onRequireAuth={() => setIsGuestFavoriteModalOpen(true)}
                             onCopy={handleCopy}
-                            onReadMore={setSelectedPrompt}
+                            onShare={handleSharePrompt}
+                            onReadMore={openPrompt}
                             onTagClick={setPublicActiveTag}
                           />
                         </motion.div>
@@ -481,8 +553,9 @@ function App() {
 
       <PromptModal
         prompt={selectedPrompt}
-        onClose={() => setSelectedPrompt(null)}
+        onClose={closePrompt}
         onCopy={handleCopy}
+        onShare={handleSharePrompt}
       />
       <AddPromptModal
         open={(isAddModalOpen || Boolean(editingPrompt)) && Boolean(currentUser)}

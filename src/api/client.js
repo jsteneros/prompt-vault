@@ -65,6 +65,12 @@ export async function getPublicPrompts() {
   return apiFetch("/api/prompts/public");
 }
 
+export async function getPromptById(id, token = "") {
+  return apiFetch(`/api/prompts/${id}`, {
+    headers: authHeader(token),
+  });
+}
+
 export async function createPrompt(token, payload) {
   return apiFetch("/api/prompts", {
     method: "POST",

@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Copy, Pencil, Star, Trash2 } from "lucide-react";
+import { Copy, Pencil, Share2, Star, Trash2 } from "lucide-react";
 import { getGravatarUrl } from "../utils/gravatar";
 
 function PromptCard({
@@ -11,6 +11,7 @@ function PromptCard({
   onRequireAuth,
   onEdit,
   onDelete,
+  onShare,
   readOnly = false,
 }) {
   const owner = prompt.owner;
@@ -109,21 +110,31 @@ function PromptCard({
           ))}
         </div>
 
-        <div className="mt-auto flex items-center justify-between pt-1">
-          <button
-            type="button"
-            onClick={() => onCopy(prompt.fullPrompt)}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-[#c9c9c9] bg-transparent px-3 py-2 text-sm font-semibold text-[#5d5d5d] transition hover:bg-[#f3f3f3]"
-          >
-            <Copy className="h-4 w-4" />
-            Copy
-          </button>
+        <div className="mt-auto space-y-2 pt-1">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onCopy(prompt.fullPrompt)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-[#c9c9c9] bg-transparent px-3 py-2 text-sm font-semibold text-[#5d5d5d] transition hover:bg-[#f3f3f3]"
+            >
+              <Copy className="h-4 w-4" />
+              Copy
+            </button>
+            <button
+              type="button"
+              onClick={() => onShare?.(prompt)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-[#c9c9c9] bg-transparent px-3 py-2 text-sm font-semibold text-[#5d5d5d] transition hover:bg-[#f3f3f3]"
+            >
+              <Share2 className="h-4 w-4" />
+              Share
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => onReadMore(prompt)}
-            className="rounded-xl bg-[#444444] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#363636]"
+            className="w-full rounded-xl bg-[#444444] px-4 py-2 text-sm font-semibold leading-none text-white transition hover:bg-[#363636]"
           >
-            Read More
+            See Full Details
           </button>
         </div>
       </div>
