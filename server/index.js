@@ -1,6 +1,5 @@
 import "dotenv/config";
 import bcrypt from "bcryptjs";
-import cors from "cors";
 import express from "express";
 import jwt from "jsonwebtoken";
 import { PrismaClient } from "@prisma/client";
@@ -11,13 +10,33 @@ const prisma = new PrismaClient();
 
 const API_PORT = Number(process.env.API_PORT || 4000);
 const JWT_SECRET = process.env.JWT_SECRET;
-const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:5173";
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || "http://localhost:5173")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 if (!JWT_SECRET) {
   throw new Error("Missing JWT_SECRET in environment");
 }
 
-app.use(cors({ origin: CORS_ORIGIN, credentials: false }));
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+    if (origin) {
+      res.header("Access-Control-Allow-Origin", origin);
+      res.header("Vary", "Origin");
+    }
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+  }
+
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+
+  next();
+});
 app.use(express.json({ limit: "10mb" }));
 
 const registerSchema = z.object({
