@@ -53,6 +53,20 @@ export async function login(payload) {
   });
 }
 
+export async function forgotPassword(payload) {
+  return apiFetch("/api/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function resetPassword(payload) {
+  return apiFetch("/api/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function getMe(token) {
   return apiFetch("/api/auth/me", { headers: authHeader(token) });
 }

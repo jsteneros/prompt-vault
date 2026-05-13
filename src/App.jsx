@@ -11,12 +11,14 @@ import Toast from "./components/Toast";
 import {
   createPrompt,
   deletePrompt,
+  forgotPassword,
   getMe,
   getMyPrompts,
   getPromptById,
   getPublicPrompts,
   login,
   register,
+  resetPassword,
   setFavorite,
   updatePrompt,
 } from "./api/client";
@@ -41,10 +43,12 @@ function App() {
   const [isGuestFavoriteModalOpen, setIsGuestFavoriteModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState("login");
   const [authError, setAuthError] = useState("");
+  const [authSuccess, setAuthSuccess] = useState("");
   const [publicActiveTag, setPublicActiveTag] = useState("All");
   const [publicSearch, setPublicSearch] = useState("");
   const [toast, setToast] = useState("");
   const [pendingSharedPromptId, setPendingSharedPromptId] = useState("");
+  const [resetToken, setResetToken] = useState("");
 
   const setPromptQueryParam = (promptId) => {
     const url = new URL(window.location.href);
@@ -52,6 +56,9 @@ function App() {
       url.searchParams.set("prompt", promptId);
     } else {
       url.searchParams.delete("prompt");
+    }
+    if (!resetToken) {
+      url.searchParams.delete("resetToken");
     }
     window.history.replaceState({}, "", url.toString());
   };
@@ -94,8 +101,17 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const sharedId = new URLSearchParams(window.location.search).get("prompt") || "";
+    const params = new URLSearchParams(window.location.search);
+    const sharedId = params.get("prompt") || "";
+    const activeResetToken = params.get("resetToken") || "";
     if (sharedId) setPendingSharedPromptId(sharedId);
+    if (activeResetToken) {
+      setResetToken(activeResetToken);
+      setAuthMode("reset");
+      setAuthError("");
+      setAuthSuccess("");
+      setIsAuthModalOpen(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -112,6 +128,7 @@ function App() {
         if (String(error.message).toLowerCase().includes("login required")) {
           setAuthMode("login");
           setAuthError("Please create an account or login to view this private prompt.");
+          setAuthSuccess("");
           setIsAuthModalOpen(true);
           return;
         }
@@ -321,11 +338,47 @@ function App() {
   const openAuthModal = (mode) => {
     setAuthMode(mode);
     setAuthError("");
+    setAuthSuccess("");
     setIsAuthModalOpen(true);
   };
 
-  const handleAuthSubmit = async ({ name, email, password }) => {
+  const handleAuthSubmit = async ({
+    name,
+    email,
+    password,
+    token: resetTokenValue,
+    localError,
+  }) => {
+    if (localError) {
+      setAuthError(localError);
+      setAuthSuccess("");
+      return;
+    }
+
     try {
+      if (authMode === "forgot") {
+        const data = await forgotPassword({ email });
+        setAuthError("");
+        setAuthSuccess(
+          data.previewUrl
+            ? `Reset link generated for local testing: ${data.previewUrl}`
+            : "If an account exists for this email, a reset link has been sent.",
+        );
+        return;
+      }
+
+      if (authMode === "reset") {
+        await resetPassword({ token: resetTokenValue, password });
+        const url = new URL(window.location.href);
+        url.searchParams.delete("resetToken");
+        window.history.replaceState({}, "", url.toString());
+        setResetToken("");
+        setAuthMode("login");
+        setAuthError("");
+        setAuthSuccess("Password reset successfully. You can login now.");
+        return;
+      }
+
       const data =
         authMode === "register"
           ? await register({ name, email, password })
@@ -335,9 +388,11 @@ function App() {
       setCurrentUser(data.user);
       setIsAuthModalOpen(false);
       setAuthError("");
+      setAuthSuccess("");
       setToast(authMode === "register" ? "Account created" : "Welcome back");
     } catch (error) {
       setAuthError(error.message || "Authentication failed");
+      setAuthSuccess("");
     }
   };
 
@@ -571,11 +626,14 @@ function App() {
         open={isAuthModalOpen}
         mode={authMode}
         error={authError}
+        successMessage={authSuccess}
+        resetToken={resetToken}
         onClose={() => setIsAuthModalOpen(false)}
         onSubmit={handleAuthSubmit}
         onSwitchMode={(mode) => {
           setAuthMode(mode);
           setAuthError("");
+          setAuthSuccess("");
         }}
       />
       <GuestFavoriteModal

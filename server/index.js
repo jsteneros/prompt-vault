@@ -1,5 +1,6 @@
 import "dotenv/config";
 import bcrypt from "bcryptjs";
+import crypto from "node:crypto";
 import express from "express";
 import jwt from "jsonwebtoken";
 import { PrismaClient } from "@prisma/client";
@@ -10,6 +11,10 @@ const prisma = new PrismaClient();
 
 const API_PORT = Number(process.env.API_PORT || 4000);
 const JWT_SECRET = process.env.JWT_SECRET;
+const APP_URL = process.env.APP_URL || "http://localhost:5173";
+const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
+const RESET_FROM_EMAIL =
+  process.env.RESET_FROM_EMAIL || "PromptVault <no-reply@promptvault.app>";
 const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || "http://localhost:5173")
   .split(",")
   .map((origin) => origin.trim())
@@ -48,6 +53,15 @@ const registerSchema = z.object({
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+});
+
+const forgotPasswordSchema = z.object({
+  email: z.string().email(),
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  password: z.string().min(6),
 });
 
 const promptSchema = z.object({
@@ -106,6 +120,50 @@ function sanitizePrompt(prompt) {
 
 function sanitizeUser(user) {
   return { id: user.id, name: user.name, email: user.email };
+}
+
+function hashResetToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+async function sendResetPasswordEmail({ email, name, resetUrl }) {
+  if (!RESEND_API_KEY) {
+    console.log(`Password reset link for ${email}: ${resetUrl}`);
+    return { delivered: false, previewUrl: resetUrl };
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: RESET_FROM_EMAIL,
+      to: [email],
+      subject: "Reset your PromptVault password",
+      html: `
+        <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #111827;">
+          <p>Hi ${name || "there"},</p>
+          <p>We received a request to reset your PromptVault password.</p>
+          <p>
+            <a href="${resetUrl}" style="display:inline-block;padding:10px 16px;background:#111827;color:#fff;text-decoration:none;border-radius:8px;">
+              Reset password
+            </a>
+          </p>
+          <p>If you did not request this, you can ignore this email.</p>
+          <p>This link will expire in 1 hour.</p>
+        </div>
+      `,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to send reset email: ${text}`);
+  }
+
+  return { delivered: true };
 }
 
 function authRequired(req, res, next) {
@@ -167,6 +225,93 @@ app.post("/api/auth/login", async (req, res) => {
 
   const token = signToken(user);
   return res.json({ token, user: sanitizeUser(user) });
+});
+
+app.post("/api/auth/forgot-password", async (req, res) => {
+  const parsed = forgotPasswordSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid input" });
+  }
+
+  const email = parsed.data.email.trim().toLowerCase();
+  const user = await prisma.user.findUnique({ where: { email } });
+
+  // Always return success to avoid email enumeration.
+  if (!user) {
+    return res.json({
+      ok: true,
+      message: "If an account exists for this email, a reset link has been sent.",
+    });
+  }
+
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  const tokenHash = hashResetToken(rawToken);
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60);
+  const resetUrl = `${APP_URL}?resetToken=${rawToken}`;
+
+  await prisma.passwordResetToken.create({
+    data: {
+      tokenHash,
+      expiresAt,
+      userId: user.id,
+    },
+  });
+
+  const emailResult = await sendResetPasswordEmail({
+    email: user.email,
+    name: user.name,
+    resetUrl,
+  });
+
+  return res.json({
+    ok: true,
+    message: "If an account exists for this email, a reset link has been sent.",
+    previewUrl: emailResult.previewUrl,
+  });
+});
+
+app.post("/api/auth/reset-password", async (req, res) => {
+  const parsed = resetPasswordSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid input" });
+  }
+
+  const tokenHash = hashResetToken(parsed.data.token);
+  const resetToken = await prisma.passwordResetToken.findUnique({
+    where: { tokenHash },
+    include: { user: true },
+  });
+
+  if (
+    !resetToken ||
+    resetToken.usedAt ||
+    resetToken.expiresAt.getTime() < Date.now()
+  ) {
+    return res.status(400).json({ error: "Reset link is invalid or expired" });
+  }
+
+  const passwordHash = await bcrypt.hash(parsed.data.password, 10);
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: resetToken.userId },
+      data: { passwordHash },
+    }),
+    prisma.passwordResetToken.update({
+      where: { id: resetToken.id },
+      data: { usedAt: new Date() },
+    }),
+    prisma.passwordResetToken.updateMany({
+      where: {
+        userId: resetToken.userId,
+        id: { not: resetToken.id },
+        usedAt: null,
+      },
+      data: { usedAt: new Date() },
+    }),
+  ]);
+
+  return res.json({ ok: true, message: "Password reset successfully." });
 });
 
 app.get("/api/auth/me", authRequired, async (req, res) => {

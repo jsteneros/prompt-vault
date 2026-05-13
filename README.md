@@ -13,6 +13,7 @@ A modern, minimal web app for collecting, organizing, and browsing AI prompts vi
 - Public/private prompt visibility
 - Public homepage feed for logged-out users
 - Account auth with JWT sessions
+- Forgot-password and reset-password flow
 - PostgreSQL persistence via Prisma
 - Framer Motion micro-interactions
 
@@ -46,9 +47,13 @@ npm run dev
 Use `.env` (see `.env.example`):
 
 - `DATABASE_URL`: PostgreSQL connection string
+- `DIRECT_URL`: direct PostgreSQL connection for Prisma migrations/schema sync
 - `JWT_SECRET`: secret used to sign JWT access tokens
 - `API_PORT`: API server port (default `4000`)
 - `CORS_ORIGIN`: allowed web origin for API calls
+- `APP_URL`: frontend app URL used in password reset links
+- `RESET_FROM_EMAIL`: sender identity for reset emails
+- `RESEND_API_KEY`: optional Resend API key for email delivery
 - `VITE_API_URL`: frontend API base URL
 
 ## Production notes

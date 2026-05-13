@@ -21,6 +21,7 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   prompts      Prompt[]
+  resetTokens  PasswordResetToken[]
 }
 
 model Prompt {
@@ -39,4 +40,16 @@ model Prompt {
 
   @@index([userId, createdAt])
   @@index([visibility, createdAt])
+}
+
+model PasswordResetToken {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
 }
