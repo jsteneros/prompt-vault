@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { LogIn, LogOut, UserPlus } from "lucide-react";
+import { LogIn, LogOut, Settings2, UserPlus } from "lucide-react";
 import AddPromptModal from "./components/AddPromptModal";
 import AuthModal from "./components/AuthModal";
 import FilterBar from "./components/FilterBar";
 import GuestFavoriteModal from "./components/GuestFavoriteModal";
 import PromptCard from "./components/PromptCard";
 import PromptModal from "./components/PromptModal";
+import SettingsPanel from "./components/SettingsPanel";
 import Toast from "./components/Toast";
 import {
   createPrompt,
@@ -18,9 +19,13 @@ import {
   getPublicPrompts,
   login,
   register,
+  resendVerification,
   resetPassword,
   setFavorite,
+  updatePassword,
+  updateProfile,
   updatePrompt,
+  verifyEmail,
 } from "./api/client";
 import { getGravatarUrl } from "./utils/gravatar";
 
@@ -34,6 +39,7 @@ function App() {
   const [prompts, setPrompts] = useState([]);
   const [publicPrompts, setPublicPrompts] = useState([]);
 
+  const [activeView, setActiveView] = useState("library");
   const [activeFilter, setActiveFilter] = useState("My Prompts");
   const [activeTag, setActiveTag] = useState(null);
   const [selectedPrompt, setSelectedPrompt] = useState(null);
@@ -49,6 +55,7 @@ function App() {
   const [toast, setToast] = useState("");
   const [pendingSharedPromptId, setPendingSharedPromptId] = useState("");
   const [resetToken, setResetToken] = useState("");
+  const [pendingVerificationToken, setPendingVerificationToken] = useState("");
 
   const setPromptQueryParam = (promptId) => {
     const url = new URL(window.location.href);
@@ -59,6 +66,9 @@ function App() {
     }
     if (!resetToken) {
       url.searchParams.delete("resetToken");
+    }
+    if (!pendingVerificationToken) {
+      url.searchParams.delete("verifyToken");
     }
     window.history.replaceState({}, "", url.toString());
   };
@@ -104,6 +114,8 @@ function App() {
     const params = new URLSearchParams(window.location.search);
     const sharedId = params.get("prompt") || "";
     const activeResetToken = params.get("resetToken") || "";
+    const activeVerifyToken = params.get("verifyToken") || "";
+
     if (sharedId) setPendingSharedPromptId(sharedId);
     if (activeResetToken) {
       setResetToken(activeResetToken);
@@ -112,12 +124,16 @@ function App() {
       setAuthSuccess("");
       setIsAuthModalOpen(true);
     }
+    if (activeVerifyToken) {
+      setPendingVerificationToken(activeVerifyToken);
+    }
   }, []);
 
   useEffect(() => {
-    if (!pendingSharedPromptId) return;
+    if (!pendingSharedPromptId) return undefined;
 
     let cancelled = false;
+
     async function loadSharedPrompt() {
       try {
         const data = await getPromptById(pendingSharedPromptId, token);
@@ -146,6 +162,51 @@ function App() {
   }, [pendingSharedPromptId, token]);
 
   useEffect(() => {
+    if (!pendingVerificationToken) return undefined;
+
+    let cancelled = false;
+
+    async function confirmEmailVerification() {
+      try {
+        const data = await verifyEmail({ token: pendingVerificationToken });
+        if (cancelled) return;
+
+        const url = new URL(window.location.href);
+        url.searchParams.delete("verifyToken");
+        window.history.replaceState({}, "", url.toString());
+
+        if (currentUser && data.user?.id === currentUser.id) {
+          setCurrentUser(data.user);
+        }
+
+        setPendingVerificationToken("");
+        setAuthMode("login");
+        setAuthError("");
+        setAuthSuccess("Your email has been verified.");
+        setIsAuthModalOpen(!currentUser);
+        setToast("Email verified ✨");
+      } catch (error) {
+        if (cancelled) return;
+
+        const url = new URL(window.location.href);
+        url.searchParams.delete("verifyToken");
+        window.history.replaceState({}, "", url.toString());
+
+        setPendingVerificationToken("");
+        setAuthMode("login");
+        setAuthError(error.message || "Verification link is invalid or expired");
+        setAuthSuccess("");
+        setIsAuthModalOpen(true);
+      }
+    }
+
+    confirmEmailVerification();
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingVerificationToken, currentUser]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadAuthed() {
@@ -160,6 +221,7 @@ function App() {
         if (cancelled) return;
         setCurrentUser(me.user);
         setPrompts(mine.prompts || []);
+        setActiveView("library");
         setActiveFilter("My Prompts");
         setActiveTag(null);
       } catch {
@@ -386,10 +448,15 @@ function App() {
 
       setToken(data.token);
       setCurrentUser(data.user);
+      setActiveView("library");
       setIsAuthModalOpen(false);
       setAuthError("");
       setAuthSuccess("");
-      setToast(authMode === "register" ? "Account created" : "Welcome back");
+      setToast(
+        authMode === "register"
+          ? "Account created. Check your inbox to verify your email."
+          : "Welcome back",
+      );
     } catch (error) {
       setAuthError(error.message || "Authentication failed");
       setAuthSuccess("");
@@ -400,9 +467,59 @@ function App() {
     setToken("");
     setCurrentUser(null);
     setPrompts([]);
+    setActiveView("library");
     setIsAddModalOpen(false);
     setEditingPrompt(null);
     setToast("Logged out");
+  };
+
+  const handleResendVerification = async () => {
+    if (!token) return { ok: false, error: "Please login first." };
+    try {
+      const data = await resendVerification(token);
+      return {
+        ok: true,
+        message: data.previewUrl
+          ? `Verification link generated for local testing: ${data.previewUrl}`
+          : data.message || "Verification email sent.",
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error.message || "Could not send verification email.",
+      };
+    }
+  };
+
+  const handleSaveProfile = async (payload) => {
+    if (!token) return { ok: false, error: "Please login first." };
+    try {
+      const data = await updateProfile(token, payload);
+      if (data.token) setToken(data.token);
+      setCurrentUser(data.user);
+      setToast("Profile updated");
+      return {
+        ok: true,
+        message: data.emailChanged
+          ? data.previewUrl
+            ? `Profile updated. Verification link generated for local testing: ${data.previewUrl}`
+            : "Profile updated. Please verify your new email address."
+          : "Profile updated successfully.",
+      };
+    } catch (error) {
+      return { ok: false, error: error.message || "Could not update profile." };
+    }
+  };
+
+  const handleUpdatePassword = async (payload) => {
+    if (!token) return { ok: false, error: "Please login first." };
+    try {
+      const data = await updatePassword(token, payload);
+      setToast("Password updated");
+      return { ok: true, message: data.message || "Password updated successfully." };
+    } catch (error) {
+      return { ok: false, error: error.message || "Could not update password." };
+    }
   };
 
   return (
@@ -444,6 +561,14 @@ function App() {
                     </div>
                     <button
                       type="button"
+                      onClick={() => setActiveView("settings")}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#c9c9c9] bg-transparent px-4 py-2 text-sm font-semibold text-[#5f5f5f] transition hover:bg-[#e7e7e7]"
+                    >
+                      <Settings2 className="h-4 w-4" />
+                      Settings
+                    </button>
+                    <button
+                      type="button"
                       onClick={handleLogout}
                       className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#c9c9c9] bg-transparent px-4 py-2 text-sm font-semibold text-[#5f5f5f] transition hover:bg-[#e7e7e7]"
                       aria-label="Logout"
@@ -480,51 +605,98 @@ function App() {
 
         {currentUser ? (
           <>
-            <FilterBar
-              tags={allTags}
-              activeFilter={activeFilter}
-              activeTag={activeTag}
-              onFilterChange={setActiveFilter}
-              onTagSelect={setActiveTag}
-              onAddPrompt={() => setIsAddModalOpen(true)}
-            />
-
-            <section className="mt-6">
-              {filteredPrompts.length ? (
-                <motion.div
-                  layout
-                  className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4"
-                >
-                  {filteredPrompts.map((prompt, index) => (
-                    <motion.div
-                      key={prompt.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: Math.min(index * 0.05, 0.25) }}
-                      className="h-full"
-                    >
-                      <PromptCard
-                        prompt={prompt}
-                        onCopy={handleCopy}
-                        onShare={handleSharePrompt}
-                        onToggleFavorite={handleToggleFavorite}
-                        onEdit={(item) => {
-                          setEditingPrompt(item);
-                          setIsAddModalOpen(true);
-                        }}
-                        onDelete={handleDeletePrompt}
-                        onReadMore={openPrompt}
-                        onTagClick={(tag) => setActiveTag(tag)}
-                      />
-                    </motion.div>
-                  ))}
-                </motion.div>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 p-10 text-center text-slate-600">
-                  No prompts yet. Add your first prompt to get started.
+            {!currentUser.emailVerifiedAt ? (
+              <div className="mb-5 flex flex-col gap-3 rounded-[24px] border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="font-semibold">Verify your email address</p>
+                  <p className="mt-1 text-amber-700">
+                    Your account is active, but email verification helps secure recovery and confirms ownership.
+                  </p>
                 </div>
-              )}
-            </section>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const result = await handleResendVerification();
+                      setToast(
+                        result.ok
+                          ? "Verification email sent"
+                          : result.error || "Could not send verification email",
+                      );
+                    }}
+                    className="inline-flex h-10 items-center justify-center rounded-xl border border-amber-300 px-4 text-sm font-semibold text-amber-800 transition hover:bg-amber-100"
+                  >
+                    Resend email
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveView("settings")}
+                    className="inline-flex h-10 items-center justify-center rounded-xl bg-amber-800 px-4 text-sm font-semibold text-white transition hover:bg-amber-900"
+                  >
+                    Open settings
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {activeView === "settings" ? (
+              <SettingsPanel
+                user={currentUser}
+                avatarUrl={avatarUrl}
+                onBack={() => setActiveView("library")}
+                onSaveProfile={handleSaveProfile}
+                onChangePassword={handleUpdatePassword}
+                onResendVerification={handleResendVerification}
+              />
+            ) : (
+              <>
+                <FilterBar
+                  tags={allTags}
+                  activeFilter={activeFilter}
+                  activeTag={activeTag}
+                  onFilterChange={setActiveFilter}
+                  onTagSelect={setActiveTag}
+                  onAddPrompt={() => setIsAddModalOpen(true)}
+                />
+
+                <section className="mt-6">
+                  {filteredPrompts.length ? (
+                    <motion.div
+                      layout
+                      className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4"
+                    >
+                      {filteredPrompts.map((prompt, index) => (
+                        <motion.div
+                          key={prompt.id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: Math.min(index * 0.05, 0.25) }}
+                          className="h-full"
+                        >
+                          <PromptCard
+                            prompt={prompt}
+                            onCopy={handleCopy}
+                            onShare={handleSharePrompt}
+                            onToggleFavorite={handleToggleFavorite}
+                            onEdit={(item) => {
+                              setEditingPrompt(item);
+                              setIsAddModalOpen(true);
+                            }}
+                            onDelete={handleDeletePrompt}
+                            onReadMore={openPrompt}
+                            onTagClick={(tag) => setActiveTag(tag)}
+                          />
+                        </motion.div>
+                      ))}
+                    </motion.div>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 p-10 text-center text-slate-600">
+                      No prompts yet. Add your first prompt to get started.
+                    </div>
+                  )}
+                </section>
+              </>
+            )}
           </>
         ) : (
           <section className="mt-6">

@@ -64,6 +64,20 @@ const resetPasswordSchema = z.object({
   password: z.string().min(6),
 });
 
+const verifyEmailSchema = z.object({
+  token: z.string().min(1),
+});
+
+const profileSchema = z.object({
+  name: z.string().trim().min(1),
+  email: z.string().email(),
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(6),
+});
+
 const promptSchema = z.object({
   title: z.string().trim().min(1),
   description: z.string().trim().min(1),
@@ -119,17 +133,21 @@ function sanitizePrompt(prompt) {
 }
 
 function sanitizeUser(user) {
-  return { id: user.id, name: user.name, email: user.email };
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    emailVerifiedAt: user.emailVerifiedAt,
+  };
 }
 
-function hashResetToken(token) {
+function hashToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
-async function sendResetPasswordEmail({ email, name, resetUrl }) {
+async function sendEmail({ to, subject, html }) {
   if (!RESEND_API_KEY) {
-    console.log(`Password reset link for ${email}: ${resetUrl}`);
-    return { delivered: false, previewUrl: resetUrl };
+    return { delivered: false };
   }
 
   const response = await fetch("https://api.resend.com/emails", {
@@ -140,9 +158,30 @@ async function sendResetPasswordEmail({ email, name, resetUrl }) {
     },
     body: JSON.stringify({
       from: RESET_FROM_EMAIL,
-      to: [email],
-      subject: "Reset your PromptVault password",
-      html: `
+      to: [to],
+      subject,
+      html,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to send email: ${text}`);
+  }
+
+  return { delivered: true };
+}
+
+async function sendResetPasswordEmail({ email, name, resetUrl }) {
+  if (!RESEND_API_KEY) {
+    console.log(`Password reset link for ${email}: ${resetUrl}`);
+    return { delivered: false, previewUrl: resetUrl };
+  }
+
+  await sendEmail({
+    to: email,
+    subject: "Reset your PromptVault password",
+    html: `
         <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #111827;">
           <p>Hi ${name || "there"},</p>
           <p>We received a request to reset your PromptVault password.</p>
@@ -155,13 +194,50 @@ async function sendResetPasswordEmail({ email, name, resetUrl }) {
           <p>This link will expire in 1 hour.</p>
         </div>
       `,
-    }),
   });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Failed to send reset email: ${text}`);
+  return { delivered: true };
+}
+
+async function createEmailVerificationToken(user) {
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  await prisma.emailVerificationToken.create({
+    data: {
+      email: user.email,
+      tokenHash: hashToken(rawToken),
+      expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      userId: user.id,
+    },
+  });
+  return rawToken;
+}
+
+async function sendVerificationEmail(user) {
+  const rawToken = await createEmailVerificationToken(user);
+  const verifyUrl = `${APP_URL}?verifyToken=${rawToken}`;
+
+  if (!RESEND_API_KEY) {
+    console.log(`Email verification link for ${user.email}: ${verifyUrl}`);
+    return { delivered: false, previewUrl: verifyUrl };
   }
+
+  await sendEmail({
+    to: user.email,
+    subject: "Verify your PromptVault email",
+    html: `
+      <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #111827;">
+        <p>Hi ${user.name || "there"},</p>
+        <p>Thanks for joining PromptVault. Please verify your email address to secure your account.</p>
+        <p>
+          <a href="${verifyUrl}" style="display:inline-block;padding:10px 16px;background:#111827;color:#fff;text-decoration:none;border-radius:8px;">
+            Verify email
+          </a>
+        </p>
+        <p>If you did not create this account, you can ignore this email.</p>
+        <p>This link will expire in 24 hours.</p>
+      </div>
+    `,
+  });
 
   return { delivered: true };
 }
@@ -201,8 +277,23 @@ app.post("/api/auth/register", async (req, res) => {
     const user = await prisma.user.create({
       data: { name, email, passwordHash },
     });
+    let verificationEmailSent = true;
+    let previewUrl;
+    try {
+      const verificationResult = await sendVerificationEmail(user);
+      verificationEmailSent = verificationResult.delivered;
+      previewUrl = verificationResult.previewUrl;
+    } catch (error) {
+      console.error("Failed to send verification email", error);
+      verificationEmailSent = false;
+    }
     const token = signToken(user);
-    return res.status(201).json({ token, user: sanitizeUser(user) });
+    return res.status(201).json({
+      token,
+      user: sanitizeUser(user),
+      verificationEmailSent,
+      previewUrl,
+    });
   } catch (error) {
     if (error.code === "P2002") {
       return res.status(409).json({ error: "Email already exists" });
@@ -245,7 +336,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
   }
 
   const rawToken = crypto.randomBytes(32).toString("hex");
-  const tokenHash = hashResetToken(rawToken);
+  const tokenHash = hashToken(rawToken);
   const expiresAt = new Date(Date.now() + 1000 * 60 * 60);
   const resetUrl = `${APP_URL}?resetToken=${rawToken}`;
 
@@ -276,7 +367,7 @@ app.post("/api/auth/reset-password", async (req, res) => {
     return res.status(400).json({ error: "Invalid input" });
   }
 
-  const tokenHash = hashResetToken(parsed.data.token);
+  const tokenHash = hashToken(parsed.data.token);
   const resetToken = await prisma.passwordResetToken.findUnique({
     where: { tokenHash },
     include: { user: true },
@@ -314,10 +405,167 @@ app.post("/api/auth/reset-password", async (req, res) => {
   return res.json({ ok: true, message: "Password reset successfully." });
 });
 
+app.post("/api/auth/resend-verification", authRequired, async (req, res) => {
+  const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+  if (user.emailVerifiedAt) {
+    return res.json({ ok: true, message: "Your email is already verified." });
+  }
+
+  await prisma.emailVerificationToken.updateMany({
+    where: { userId: user.id, usedAt: null },
+    data: { usedAt: new Date() },
+  });
+
+  try {
+    const result = await sendVerificationEmail(user);
+    return res.json({
+      ok: true,
+      message: "Verification email sent.",
+      previewUrl: result.previewUrl,
+    });
+  } catch (error) {
+    console.error("Failed to resend verification email", error);
+    return res.status(500).json({ error: "Could not send verification email" });
+  }
+});
+
+app.post("/api/auth/verify-email", async (req, res) => {
+  const parsed = verifyEmailSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid input" });
+  }
+
+  const tokenHash = hashToken(parsed.data.token);
+  const verificationToken = await prisma.emailVerificationToken.findUnique({
+    where: { tokenHash },
+    include: { user: true },
+  });
+
+  if (
+    !verificationToken ||
+    verificationToken.usedAt ||
+    verificationToken.expiresAt.getTime() < Date.now() ||
+    verificationToken.user.email !== verificationToken.email
+  ) {
+    return res.status(400).json({ error: "Verification link is invalid or expired" });
+  }
+
+  const verifiedAt = new Date();
+
+  const [user] = await prisma.$transaction([
+    prisma.user.update({
+      where: { id: verificationToken.userId },
+      data: { emailVerifiedAt: verifiedAt },
+    }),
+    prisma.emailVerificationToken.update({
+      where: { id: verificationToken.id },
+      data: { usedAt: verifiedAt },
+    }),
+    prisma.emailVerificationToken.updateMany({
+      where: {
+        userId: verificationToken.userId,
+        id: { not: verificationToken.id },
+        usedAt: null,
+      },
+      data: { usedAt: verifiedAt },
+    }),
+  ]);
+
+  return res.json({
+    ok: true,
+    message: "Email verified successfully.",
+    user: sanitizeUser(user),
+  });
+});
+
 app.get("/api/auth/me", authRequired, async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.user.id } });
   if (!user) return res.status(401).json({ error: "Unauthorized" });
   return res.json({ user: sanitizeUser(user) });
+});
+
+app.put("/api/auth/profile", authRequired, async (req, res) => {
+  const parsed = profileSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid input" });
+  }
+
+  const existingUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+  if (!existingUser) return res.status(401).json({ error: "Unauthorized" });
+
+  const name = parsed.data.name.trim();
+  const email = parsed.data.email.trim().toLowerCase();
+  const emailChanged = email !== existingUser.email;
+
+  try {
+    const updatedUser = await prisma.user.update({
+      where: { id: existingUser.id },
+      data: {
+        name,
+        email,
+        ...(emailChanged ? { emailVerifiedAt: null } : {}),
+      },
+    });
+
+    let verificationEmailSent = false;
+    let previewUrl;
+
+    if (emailChanged) {
+      await prisma.emailVerificationToken.updateMany({
+        where: { userId: updatedUser.id, usedAt: null },
+        data: { usedAt: new Date() },
+      });
+
+      try {
+        const result = await sendVerificationEmail(updatedUser);
+        verificationEmailSent = result.delivered;
+        previewUrl = result.previewUrl;
+      } catch (error) {
+        console.error("Failed to send verification email after profile update", error);
+      }
+    }
+
+    return res.json({
+      user: sanitizeUser(updatedUser),
+      token: signToken(updatedUser),
+      emailChanged,
+      verificationEmailSent,
+      previewUrl,
+    });
+  } catch (error) {
+    if (error.code === "P2002") {
+      return res.status(409).json({ error: "Email already exists" });
+    }
+    return res.status(500).json({ error: "Could not update profile" });
+  }
+});
+
+app.put("/api/auth/password", authRequired, async (req, res) => {
+  const parsed = changePasswordSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid input" });
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+  if (!user) return res.status(401).json({ error: "Unauthorized" });
+
+  const passwordMatches = await bcrypt.compare(
+    parsed.data.currentPassword,
+    user.passwordHash,
+  );
+  if (!passwordMatches) {
+    return res.status(400).json({ error: "Current password is incorrect" });
+  }
+
+  const passwordHash = await bcrypt.hash(parsed.data.newPassword, 10);
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { passwordHash },
+  });
+
+  return res.json({ ok: true, message: "Password updated successfully." });
 });
 
 app.get("/api/prompts", authRequired, async (req, res) => {

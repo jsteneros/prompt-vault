@@ -13,7 +13,9 @@ A modern, minimal web app for collecting, organizing, and browsing AI prompts vi
 - Public/private prompt visibility
 - Public homepage feed for logged-out users
 - Account auth with JWT sessions
+- Email verification with resend flow
 - Forgot-password and reset-password flow
+- Account settings page for profile + password updates
 - PostgreSQL persistence via Prisma
 - Framer Motion micro-interactions
 
@@ -52,7 +54,7 @@ Use `.env` (see `.env.example`):
 - `API_PORT`: API server port (default `4000`)
 - `CORS_ORIGIN`: allowed web origin for API calls
 - `APP_URL`: frontend app URL used in password reset links
-- `RESET_FROM_EMAIL`: sender identity for reset emails
+- `RESET_FROM_EMAIL`: sender identity for reset and verification emails
 - `RESEND_API_KEY`: optional Resend API key for email delivery
 - `VITE_API_URL`: frontend API base URL
 
@@ -61,3 +63,5 @@ Use `.env` (see `.env.example`):
 - Run database migrations on deploy with `npm run prisma:deploy`
 - Set a strong `JWT_SECRET` in production
 - Set `CORS_ORIGIN` and `VITE_API_URL` to your deployed domains
+- Set `APP_URL` to your deployed frontend domain so reset and verification links resolve correctly
+- `RESET_FROM_EMAIL` must be a sender Resend allows for your verified domain

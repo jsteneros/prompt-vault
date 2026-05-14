@@ -124,25 +124,27 @@ function AuthModal({
                 </label>
               ) : null}
 
-              <label className="block space-y-1.5">
-                <span className="text-sm font-medium text-slate-700">Email</span>
-                <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5">
-                  <Mail className="h-4 w-4 text-slate-400" />
-                  <input
-                    type="email"
-                    required
-                    value={form.email}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        email: event.target.value,
-                      }))
-                    }
-                    className="w-full border-0 bg-transparent text-sm text-slate-800 outline-none"
-                    placeholder="you@email.com"
-                  />
-                </div>
-              </label>
+              {!isResetPassword ? (
+                <label className="block space-y-1.5">
+                  <span className="text-sm font-medium text-slate-700">Email</span>
+                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5">
+                    <Mail className="h-4 w-4 text-slate-400" />
+                    <input
+                      type="email"
+                      required
+                      value={form.email}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          email: event.target.value,
+                        }))
+                      }
+                      className="w-full border-0 bg-transparent text-sm text-slate-800 outline-none"
+                      placeholder="you@email.com"
+                    />
+                  </div>
+                </label>
+              ) : null}
 
               {!isForgotPassword ? (
                 <label className="block space-y-1.5">

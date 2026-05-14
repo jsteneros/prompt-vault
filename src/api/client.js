@@ -67,8 +67,38 @@ export async function resetPassword(payload) {
   });
 }
 
+export async function resendVerification(token) {
+  return apiFetch("/api/auth/resend-verification", {
+    method: "POST",
+    headers: authHeader(token),
+  });
+}
+
+export async function verifyEmail(payload) {
+  return apiFetch("/api/auth/verify-email", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function getMe(token) {
   return apiFetch("/api/auth/me", { headers: authHeader(token) });
+}
+
+export async function updateProfile(token, payload) {
+  return apiFetch("/api/auth/profile", {
+    method: "PUT",
+    headers: authHeader(token),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updatePassword(token, payload) {
+  return apiFetch("/api/auth/password", {
+    method: "PUT",
+    headers: authHeader(token),
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function getMyPrompts(token) {

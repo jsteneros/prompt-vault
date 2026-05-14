@@ -14,14 +14,16 @@ enum Visibility {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  name         String
-  email        String   @unique
-  passwordHash String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  prompts      Prompt[]
-  resetTokens  PasswordResetToken[]
+  id                 String                   @id @default(cuid())
+  name               String
+  email              String                   @unique
+  emailVerifiedAt    DateTime?
+  passwordHash       String
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  prompts            Prompt[]
+  resetTokens        PasswordResetToken[]
+  verificationTokens EmailVerificationToken[]
 }
 
 model Prompt {
@@ -44,6 +46,19 @@ model Prompt {
 
 model PasswordResetToken {
   id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model EmailVerificationToken {
+  id         String   @id @default(cuid())
+  email      String
   tokenHash  String   @unique
   expiresAt  DateTime
   usedAt     DateTime?
